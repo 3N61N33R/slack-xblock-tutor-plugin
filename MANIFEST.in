@@ -1,0 +1,2 @@
+recursive-include tutorslack_xblock_tutor_plugin/patches *
+recursive-include tutorslack_xblock_tutor_plugin/templates *

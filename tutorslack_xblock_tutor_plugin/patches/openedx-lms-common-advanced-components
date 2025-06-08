@@ -1,0 +1,24 @@
+# This patch ensures ADVANCED_COMPONENT_TYPES is correctly extended for Studio.
+# It targets the LMS settings as Studio is part of the LMS.
+# It's important to merge with existing components, not overwrite them.
+
+# First, ensure that ADVANCED_COMPONENT_TYPES is defined.
+# It typically is, but this handles cases where it might not be.
+if "ADVANCED_COMPONENT_TYPES" not in locals():
+    ADVANCED_COMPONENT_TYPES = []
+
+# Filter out any existing "slack_xblock" entry to avoid duplicates
+ADVANCED_COMPONENT_TYPES = [
+    item for item in ADVANCED_COMPONENT_TYPES if item[0] != "slack_xblock"
+]
+
+# Add our Slack XBlock
+ADVANCED_COMPONENT_TYPES.append(("slack_xblock", "Slack XBlock", "Advanced"))
+
+
+# If you wanted it specifically under the "Discussion" category (less common for arbitrary XBlocks, but possible):
+# If you decide to use 'Discussion', make sure to comment out or remove the 'Advanced' line above.
+# try:
+#     ADVANCED_COMPONENT_TYPES.append(("slack_xblock", "Slack XBlock", "Discussion"))
+# except NameError:
+#     ADVANCED_COMPONENT_TYPES = [("slack_xblock", "Slack XBlock", "Discussion")]

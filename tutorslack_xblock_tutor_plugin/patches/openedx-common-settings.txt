@@ -1,0 +1,11 @@
+# Enable the slack_xblock XBlock
+if "XBLOCK_ALPHA_ENABLED_FEATURES" not in FEATURES:
+    FEATURES["XBLOCK_ALPHA_ENABLED_FEATURES"] = []
+if "slack_xblock" not in FEATURES["XBLOCK_ALPHA_ENABLED_FEATURES"]:
+    FEATURES["XBLOCK_ALPHA_ENABLED_FEATURES"].append("slack_xblock")
+
+# Add slack_xblock to INSTALLED_APPS
+if "INSTALLED_APPS" not in INSTALLED_APPS:
+    INSTALLED_APPS = []
+if "slack_xblock" not in INSTALLED_APPS:
+    INSTALLED_APPS.append("slack_xblock")
