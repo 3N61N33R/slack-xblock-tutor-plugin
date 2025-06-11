@@ -11,12 +11,18 @@ from .__about__ import __version__
 # CONFIGURATION
 ########################################
 
+# Define the path to your XBlock source code
+XBLOCK_SOURCE_PATH = "add-path-to-your-local-xblock-source-code-here"
+
+print(f"XBlock source path: {XBLOCK_SOURCE_PATH}")
+
 hooks.Filters.CONFIG_DEFAULTS.add_items(
     [
         # Add your new settings that have default values here.
         # Each new setting is a pair: (setting_name, default_value).
         # Prefix your setting names with 'SLACK_XBLOCK_TUTOR_PLUGIN_'.
         ("SLACK_XBLOCK_TUTOR_PLUGIN_VERSION", __version__),
+        ("SLACK_XBLOCK_TUTOR_PLUGIN_XBLOCK_SOURCE_PATH", XBLOCK_SOURCE_PATH),
     ]
 )
 
@@ -155,7 +161,9 @@ hooks.Filters.ENV_TEMPLATE_TARGETS.add_items(
 
 # For each file in tutorslack_xblock_tutor_plugin/patches,
 # apply a patch based on the file's name and contents.
-for path in glob(str(importlib_resources.files("tutorslack_xblock_tutor_plugin") / "patches" / "*")):
+for path in glob(
+    str(importlib_resources.files("tutorslack_xblock_tutor_plugin") / "patches" / "*")
+):
     with open(path, encoding="utf-8") as patch_file:
         hooks.Filters.ENV_PATCHES.add_item((os.path.basename(path), patch_file.read()))
 
@@ -225,15 +233,148 @@ for path in glob(str(importlib_resources.files("tutorslack_xblock_tutor_plugin")
 
 # This would allow you to run:
 #   $ tutor slack-xblock-tutor-plugin example-command
-# --- Add XBlock-specific variables ---
+
+########################################
+# XBLOCK CONFIGURATION
+########################################
+
 # Define the basename of your XBlock directory.
 # This must match the name of the directory you copied into build/openedx/xblock/
 XBLOCK_BASENAME = "slack_xblock"
 
+
+# Add XBlock to mounted directories for development
 @hooks.Filters.MOUNTED_DIRECTORIES.add()
 def add_slack_xblock_mounted_directory(mounted_directories):
     # The first item is the image name ("openedx" for LMS/CMS)
     # The second item is a regex that matches the basename of your XBlock.
-    # The cookiecutter's build/openedx/xblock directory will be mounted to /openedx/xblock_src/
     mounted_directories.append(("openedx", f".*{XBLOCK_BASENAME}.*"))
     return mounted_directories
+
+
+# Add custom configuration values for slack xblock
+hooks.Filters.CONFIG_DEFAULTS.add_items(
+    [
+        ("SLACK_XBLOCK_DEFAULT_WORKSPACE_URL", "https://coding-campi.slack.com"),
+        ("SLACK_XBLOCK_ENABLE_AUTO_CHANNELS", True),
+        ("SLACK_XBLOCK_TRACK_ANALYTICS", True),
+    ]
+)
+
+
+# Add environment template variables for configuration
+@hooks.Filters.ENV_TEMPLATE_VARIABLES.add()
+def add_slack_xblock_template_variables(variables):
+    variables.append(
+        (
+            "SLACK_XBLOCK_CONFIG",
+            {
+                "DEFAULT_WORKSPACE_URL": "{{ SLACK_XBLOCK_DEFAULT_WORKSPACE_URL }}",
+                "ENABLE_AUTO_CHANNELS": "{{ SLACK_XBLOCK_ENABLE_AUTO_CHANNELS }}",
+                "TRACK_ANALYTICS": "{{ SLACK_XBLOCK_TRACK_ANALYTICS }}",
+            },
+        )
+    )
+    return variables
+
+
+# Install XBlock requirements
+hooks.Filters.ENV_PATCHES.add_item(
+    (
+        "openedx-dockerfile-post-python-requirements",
+        """# Install slack XBlock
+# In development, install from the mounted path inside the container.
+# This path must be consistent with the `volumes:` mount defined elsewhere.
+RUN pip install -e /openedx/slack_xblock
+
+# In production/non-local-mounts, install directly from GitHub (standard install)
+# The `if` condition below is useful if you want a fallback for non-dev environments
+# that don't have the local mount. However, for `tutor dev build`, the above line is what runs.
+# {% if not SLACK_XBLOCK_TUTOR_PLUGIN_XBLOCK_SOURCE_PATH %}
+# RUN pip install git+https://github.com/3N61N33R/slack-xblock.git@main#egg=slack_xblock
+# {% endif %}
+""",
+    )
+)
+
+# hooks.Filters.ENV_PATCHES.add_item(
+#     (
+#         "openedx-dockerfile-post-python-requirements",
+#         """# Install slack XBlock
+# {% if SLACK_XBLOCK_TUTOR_PLUGIN_XBLOCK_SOURCE_PATH %}
+# RUN pip install -e {{ SLACK_XBLOCK_TUTOR_PLUGIN_XBLOCK_SOURCE_PATH }}
+# {% else %}
+# RUN pip install slack_xblock==1.0.0
+# {% endif %}
+# """,
+#     )
+# )
+
+# Add the XBlock to installed apps via patches
+hooks.Filters.ENV_PATCHES.add_item(
+    (
+        "openedx-lms-common-settings",
+        """# Slack XBlock settings
+INSTALLED_APPS.append('slack_xblock')
+
+# Enable slack XBlock feature
+FEATURES['ENABLE_SLACK_XBLOCK'] = True
+
+# Slack XBlock configuration
+SLACK_XBLOCK_CONFIG = {{ SLACK_XBLOCK_CONFIG | tojson }}
+""",
+    )
+)
+
+hooks.Filters.ENV_PATCHES.add_item(
+    (
+        "openedx-cms-common-settings",
+        """# Slack XBlock settings
+INSTALLED_APPS.append('slack_xblock')
+
+# Enable slack XBlock feature
+FEATURES['ENABLE_SLACK_XBLOCK'] = True
+
+# Slack XBlock configuration  
+SLACK_XBLOCK_CONFIG = {{ SLACK_XBLOCK_CONFIG | tojson }}
+""",
+    )
+)
+
+# Mount source code for development in both LMS and CMS
+if os.path.exists(XBLOCK_SOURCE_PATH):
+    hooks.Filters.ENV_PATCHES.add_item(
+        (
+            "local-docker-compose-lms-dependencies",
+            f"""volumes:
+  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
+""",
+        )
+    )
+
+    hooks.Filters.ENV_PATCHES.add_item(
+        (
+            "local-docker-compose-cms-dependencies",
+            f"""volumes:
+  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
+""",
+        )
+    )
+
+    hooks.Filters.ENV_PATCHES.add_item(
+        (
+            "dev-docker-compose-lms-dependencies",
+            f"""volumes:
+  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
+""",
+        )
+    )
+
+    hooks.Filters.ENV_PATCHES.add_item(
+        (
+            "dev-docker-compose-cms-dependencies",
+            f"""volumes:
+  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
+""",
+        )
+    )
