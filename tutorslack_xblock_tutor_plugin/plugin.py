@@ -11,18 +11,29 @@ from .__about__ import __version__
 # CONFIGURATION
 ########################################
 
-# Define the path to your XBlock source code
-XBLOCK_SOURCE_PATH = "add-path-to-your-local-xblock-source-code-here"
-
-print(f"XBlock source path: {XBLOCK_SOURCE_PATH}")
-
 hooks.Filters.CONFIG_DEFAULTS.add_items(
     [
         # Add your new settings that have default values here.
         # Each new setting is a pair: (setting_name, default_value).
         # Prefix your setting names with 'SLACK_XBLOCK_TUTOR_PLUGIN_'.
         ("SLACK_XBLOCK_TUTOR_PLUGIN_VERSION", __version__),
-        ("SLACK_XBLOCK_TUTOR_PLUGIN_XBLOCK_SOURCE_PATH", XBLOCK_SOURCE_PATH),
+        # Define the individual settings
+        (
+            "SLACK_XBLOCK_TUTOR_PLUGIN_DEFAULT_WORKSPACE_URL",
+            "https://coding-campi.slack.com",
+        ),
+        ("SLACK_XBLOCK_TUTOR_PLUGIN_ENABLE_AUTO_CHANNELS", True),
+        ("SLACK_XBLOCK_TUTOR_PLUGIN_TRACK_ANALYTICS", True),
+        # Define the SLACK_XBLOCK_CONFIG dictionary directly with the variables
+        # This will be rendered once when the env is saved.
+        (
+            "SLACK_XBLOCK_TUTOR_PLUGIN__CONFIG",
+            {
+                "DEFAULT_WORKSPACE_URL": "{{ SLACK_XBLOCK_TUTOR_PLUGIN_DEFAULT_WORKSPACE_URL }}",
+                "ENABLE_AUTO_CHANNELS": "{{ SLACK_XBLOCK_TUTOR_PLUGIN_ENABLE_AUTO_CHANNELS }}",
+                "TRACK_ANALYTICS": "{{ SLACK_XBLOCK_TUTOR_PLUGIN_TRACK_ANALYTICS }}",
+            },
+        ),
     ]
 )
 
@@ -140,15 +151,30 @@ hooks.Filters.ENV_TEMPLATE_ROOTS.add_items(
     ]
 )
 
-hooks.Filters.ENV_TEMPLATE_TARGETS.add_items(
-    # For each pair (source_path, destination_path):
-    # templates at ``source_path`` (relative to your ENV_TEMPLATE_ROOTS) will be
-    # rendered to ``source_path/destination_path`` (relative to your Tutor environment).
-    # For example, ``tutorslack_xblock_tutor_plugin/templates/slack-xblock-tutor-plugin/build``
-    # will be rendered to ``$(tutor config printroot)/env/plugins/slack-xblock-tutor-plugin/build``.
+hooks.Filters.ENV_TEMPLATE_ROOTS.add_items(
     [
-        ("slack-xblock-tutor-plugin/build", "plugins"),
-        ("slack-xblock-tutor-plugin/apps", "plugins"),
+        # Only add your 'templates' directory as a Jinja template root.
+        str(importlib_resources.files("tutorslack_xblock_tutor_plugin") / "templates"),
+    ]
+)
+
+hooks.Filters.ENV_TEMPLATE_TARGETS.add_items(
+    [
+        # This copies the entire 'build' directory from the root of your plugin
+        # (tutor-contrib-slack-xblock-tutor-plugin/build)
+        # to a specific location within the Tutor environment's build context:
+        # ~/Library/Application Support/tutor-main/env/build/openedx/plugins/slack-xblock-tutor-plugin/build
+        (
+            str(
+                importlib_resources.files(__name__).parent / "build"
+            ),  # Source: Path to your plugin's 'build' dir
+            "openedx/slack_xblock_assets",  # Destination: Relative to env/
+        ),
+        # Remove or adjust this line if you don't have an 'apps' directory at the root
+        # of your plugin that needs to be copied into 'env/plugins'.
+        # If you DO have it, make sure the destination is accurate relative to env/build.
+        # For simplicity, you might temporarily remove this if it's not strictly needed for the XBlock.
+        # ("slack-xblock-tutor-plugin/apps", "plugins"),
     ],
 )
 
@@ -238,64 +264,34 @@ for path in glob(
 # XBLOCK CONFIGURATION
 ########################################
 
-# Define the basename of your XBlock directory.
-# This must match the name of the directory you copied into build/openedx/xblock/
-XBLOCK_BASENAME = "slack_xblock"
-
-
-# Add XBlock to mounted directories for development
-@hooks.Filters.MOUNTED_DIRECTORIES.add()
-def add_slack_xblock_mounted_directory(mounted_directories):
-    # The first item is the image name ("openedx" for LMS/CMS)
-    # The second item is a regex that matches the basename of your XBlock.
-    mounted_directories.append(("openedx", f".*{XBLOCK_BASENAME}.*"))
-    return mounted_directories
-
-
-# Add custom configuration values for slack xblock
-hooks.Filters.CONFIG_DEFAULTS.add_items(
-    [
-        ("SLACK_XBLOCK_DEFAULT_WORKSPACE_URL", "https://coding-campi.slack.com"),
-        ("SLACK_XBLOCK_ENABLE_AUTO_CHANNELS", True),
-        ("SLACK_XBLOCK_TRACK_ANALYTICS", True),
-    ]
-)
-
-
-# Add environment template variables for configuration
-@hooks.Filters.ENV_TEMPLATE_VARIABLES.add()
-def add_slack_xblock_template_variables(variables):
-    variables.append(
-        (
-            "SLACK_XBLOCK_CONFIG",
-            {
-                "DEFAULT_WORKSPACE_URL": "{{ SLACK_XBLOCK_DEFAULT_WORKSPACE_URL }}",
-                "ENABLE_AUTO_CHANNELS": "{{ SLACK_XBLOCK_ENABLE_AUTO_CHANNELS }}",
-                "TRACK_ANALYTICS": "{{ SLACK_XBLOCK_TRACK_ANALYTICS }}",
-            },
-        )
-    )
-    return variables
-
-
-# Install XBlock requirements
 hooks.Filters.ENV_PATCHES.add_item(
     (
         "openedx-dockerfile-post-python-requirements",
-        """# Install slack XBlock
-# In development, install from the mounted path inside the container.
-# This path must be consistent with the `volumes:` mount defined elsewhere.
-RUN pip install -e /openedx/slack_xblock
-
-# In production/non-local-mounts, install directly from GitHub (standard install)
-# The `if` condition below is useful if you want a fallback for non-dev environments
-# that don't have the local mount. However, for `tutor dev build`, the above line is what runs.
-# {% if not SLACK_XBLOCK_TUTOR_PLUGIN_XBLOCK_SOURCE_PATH %}
-# RUN pip install git+https://github.com/3N61N33R/slack-xblock.git@main#egg=slack_xblock
-# {% endif %}
+        """
+# Install slack XBlock directly from GitHub.
+RUN pip install git+https://github.com/3N61N33R/slack-xblock.git@main#egg=slack_xblock
 """,
     )
 )
+
+# Install XBlock requirements
+# hooks.Filters.ENV_PATCHES.add_item(
+#     (
+#         "openedx-dockerfile-post-python-requirements",
+#         """
+# # Copy the XBlock source code into the Docker image build context
+# # The path below is relative to the Docker build context root.
+# # It matches the destination path set by ENV_TEMPLATE_TARGETS above.
+# COPY --chown=openedx:openedx slack_xblock_assets/openedx/xblock/slack_xblock /openedx/slack_xblock/
+
+# # Install slack XBlock in editable mode from the copied path.
+# RUN pip install -e /openedx/slack_xblock
+
+# # Optional: Add the non-editable install from GitHub as a fallback/alternative for production.
+# # RUN pip install git+https://github.com/3N61N33R/slack-xblock.git@main#egg=slack_xblock
+# """,
+#     )
+# )
 
 # hooks.Filters.ENV_PATCHES.add_item(
 #     (
@@ -321,7 +317,7 @@ INSTALLED_APPS.append('slack_xblock')
 FEATURES['ENABLE_SLACK_XBLOCK'] = True
 
 # Slack XBlock configuration
-SLACK_XBLOCK_CONFIG = {{ SLACK_XBLOCK_CONFIG | tojson }}
+SLACK_XBLOCK_TUTOR_PLUGIN__CONFIGG = {{ SLACK_XBLOCK_TUTOR_PLUGIN__CONFIG | tojson }}
 """,
     )
 )
@@ -336,45 +332,18 @@ INSTALLED_APPS.append('slack_xblock')
 FEATURES['ENABLE_SLACK_XBLOCK'] = True
 
 # Slack XBlock configuration  
-SLACK_XBLOCK_CONFIG = {{ SLACK_XBLOCK_CONFIG | tojson }}
+SLACK_XBLOCK_TUTOR_PLUGIN__CONFIG = {{ SLACK_XBLOCK_TUTOR_PLUGIN__CONFIG | tojson }}
 """,
     )
 )
 
-# Mount source code for development in both LMS and CMS
-if os.path.exists(XBLOCK_SOURCE_PATH):
-    hooks.Filters.ENV_PATCHES.add_item(
-        (
-            "local-docker-compose-lms-dependencies",
-            f"""volumes:
-  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
-""",
-        )
-    )
 
-    hooks.Filters.ENV_PATCHES.add_item(
-        (
-            "local-docker-compose-cms-dependencies",
-            f"""volumes:
-  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
-""",
-        )
-    )
-
-    hooks.Filters.ENV_PATCHES.add_item(
-        (
-            "dev-docker-compose-lms-dependencies",
-            f"""volumes:
-  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
-""",
-        )
-    )
-
-    hooks.Filters.ENV_PATCHES.add_item(
-        (
-            "dev-docker-compose-cms-dependencies",
-            f"""volumes:
-  - {XBLOCK_SOURCE_PATH}:/openedx/slack_xblock
-""",
-        )
-    )
+# The mounted_directories hook is for AFTER the build, for live code changes.
+# It's less crucial if you copy during build, but can be kept for consistency
+# if you later add manual mounts for debugging.
+@hooks.Filters.MOUNTED_DIRECTORIES.add()
+def add_slack_xblock_mounted_directory(mounted_directories):
+    # This mounts the XBlock source (which is already copied to env/build/openedx/openedx/xblock/slack_xblock)
+    # into the running container.
+    mounted_directories.append(("openedx", "openedx/xblock/slack_xblock"))
+    return mounted_directories
